@@ -1,0 +1,80 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Ubuntu Corpus V1 — Dependencies (World-Class Edition)
+#  Install: pip install -r requirements.txt
+#
+#  Sections:
+#    CORE         — Required. Pipeline will not run without these.
+#    QUALITY      — Strongly recommended. Enables dual-model cross-validation,
+#                   language purity filtering, audio SNR analysis.
+#    EXPORT       — Recommended. Parquet export for BigQuery/Databricks.
+#    PUBLISH      — Required for HuggingFace publishing.
+#    OPTIONAL     — Nice-to-have improvements.
+#
+#  Quick start (minimal):
+#    pip install openai-whisper yt-dlp pyyaml
+#
+#  Full world-class stack:
+#    pip install -r requirements.txt
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── CORE — Required ───────────────────────────────────────────────────────────
+faster-whisper>=1.0.0      # Primary transcription model (Whisper large-v3)
+yt-dlp>=2024.1.1                # Audio harvesting (YouTube, 1000+ platforms)
+pyyaml>=6.0                     # Config file parsing
+requests>=2.31.0                # HTTP requests (RSS, direct downloads)
+tqdm>=4.66.0                    # Progress bars
+
+# ── QUALITY — Strongly Recommended ───────────────────────────────────────────
+# Enables: dual-model cross-validation, language purity, audio SNR analysis.
+# Without these, pipeline still runs but produces lower quality data.
+
+transformers>=4.37.0            # Facebook MMS-300M secondary transcription model
+                                # Used for cross-validation: Whisper ↔ MMS agreement score
+                                # Determines quality tier (Platinum/Gold/Silver)
+
+librosa>=0.10.0                 # Audio signal processing
+                                # Used for: SNR computation, silence ratio, audio quality
+
+soundfile>=0.12.1               # Audio I/O (required by librosa for .mp3)
+
+lingua-language-detector>=2.0.0 # High-accuracy language identification
+                                 # Used for code-switching detection (language purity filter)
+                                 # Supports 75 languages including African languages
+                                 # Install: pip install lingua-language-detector
+
+# ── EXPORT — Recommended ──────────────────────────────────────────────────────
+pyarrow>=14.0.0                 # Parquet export (BigQuery / Snowflake / Databricks)
+                                # Enables columnar format for enterprise customers
+
+# ── PUBLISH — Required for HuggingFace ───────────────────────────────────────
+huggingface_hub>=0.20.0         # Push datasets to HuggingFace Hub
+datasets>=2.16.0                # HuggingFace datasets format utilities
+
+# ── TORCH — Required by Whisper & Transformers ────────────────────────────────
+# CPU version (default — slower but universally compatible):
+torch>=2.1.0
+
+# GPU version (CUDA 11.8 — uncomment if you have a GPU):
+# torch>=2.1.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+
+# GPU version (CUDA 12.1 — uncomment if you have a newer GPU):
+# torch>=2.1.0+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# ── OPTIONAL — Extra improvements ─────────────────────────────────────────────
+numpy>=1.24.0                   # Numerical operations (also required by librosa/torch)
+langdetect>=1.0.9               # Fallback language detector if lingua not available
+
+# ── SYSTEM DEPENDENCIES (install separately) ──────────────────────────────────
+# These cannot be installed via pip. Install them on your system first.
+#
+#   Ubuntu/Debian:
+#     sudo apt install ffmpeg
+#
+#   macOS:
+#     brew install ffmpeg
+#
+#   Windows:
+#     https://ffmpeg.org/download.html
+#     (add ffmpeg/bin to your PATH)
+#
+# Verify: ffmpeg -version && ffprobe -version

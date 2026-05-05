@@ -1,0 +1,280 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Ubuntu Corpus — Configuration V1 (World-Class Edition)
+#
+#  This pipeline competes directly with:
+#    - Mozilla Common Voice  (human validation, 100+ languages)
+#    - Google FLEURS         (automated QA, 102 languages)
+#    - Meta VoxPopuli        (parliamentary, 23 languages)
+#
+#  Our advantage: deeper quality filters, dual-model cross-validation,
+#  dialect-level granularity, and full automation with zero human cost.
+#
+#  To add a new language: add 6 lines under languages:
+#    - name: "Zulu"
+#      code: "zu"
+#      region: "Southern Africa"
+#      sources:
+#        - url: "https://www.youtube.com/@SABCZulu"
+#          domain: "news"
+# ════════════════════════════════════════════════════════════════════════════
+
+version: "1.0"
+
+# ─── Pipeline Settings ────────────────────────────────────────────────────────
+
+work_dir:                "data"
+max_duration_seconds:    3600        # Max 1 hour per audio source
+harvest_delay_seconds:   2           # Polite crawling delay between downloads
+max_harvest_workers:     2           # Parallel download threads
+
+# ─── Transcription ────────────────────────────────────────────────────────────
+# Recommendation: large-v3 for world-class quality, base for fast testing.
+# large-v3 = 1.5GB RAM, ~10x slower than base, but dramatically better on African langs.
+
+whisper_model:  "distil-large-v3"          # tiny | base | small | medium | large-v3 | distil-large-v3
+device:         "cpu"               # cpu | cuda
+
+# ─── Quality Thresholds ───────────────────────────────────────────────────────
+# These are the STRICTEST settings by default.
+# Lower them ONLY if you are getting 0 published documents.
+
+min_quality_score:      0.72        # Hard floor — below this = automatic reject
+min_word_count:         80          # Minimum words per document
+min_duration_seconds:   20.0        # Minimum audio duration
+min_lexical_diversity:  0.50        # Type-token ratio floor
+max_noise_ratio:        0.20        # Max fraction of noisy segments
+max_repeat_ratio:       0.03        # Max repeated trigram fraction
+max_foreign_ratio:      0.10        # Max foreign-language token ratio
+
+# ─── Cross-Validation (Dual-Model) ───────────────────────────────────────────
+# Whisper large-v3 vs Facebook MMS-300M.
+# Agreement determines quality tier (Platinum/Gold/Silver).
+# Requires: pip install transformers librosa
+
+cross_validation:
+  enabled:                 true
+  secondary_model:         "facebook/mms-300m"     # Best for low-resource African langs
+  sample_seconds:          30                       # Validate on first 30s of audio
+  thresholds:
+    platinum:              0.88                     # ≥ 88% Levenshtein agreement
+    gold:                  0.72                     # ≥ 72%
+    silver:                0.55                     # ≥ 55%
+    reject:                0.40                     # < 40% = reject
+
+# ─── Language Identification (Purity Filter) ──────────────────────────────────
+# Detects code-switching (mixing African language with French, English, etc.)
+# Documents > max_foreign_ratio foreign tokens are rejected.
+# Requires: pip install lingua-language-detector (or langdetect as fallback)
+
+language_identification:
+  enabled:                 true
+  max_foreign_ratio:       0.10                    # Max 10% foreign tokens
+  foreign_languages:       ["fr", "en", "pt", "ar"]
+  detector:                "lingua"                # lingua | langdetect | heuristic
+
+# ─── Audio Quality ────────────────────────────────────────────────────────────
+# SNR and silence ratio are computed by librosa (optional).
+# Requires: pip install librosa
+
+audio_quality:
+  enabled:                 true
+  min_snr_db:              8.0                     # Minimum signal-to-noise ratio
+  max_silence_ratio:       0.35                    # Max 35% silence
+
+# ─── Export Settings ──────────────────────────────────────────────────────────
+
+export:
+  jsonl:          true       # Standard HuggingFace format
+  parquet:        true       # BigQuery / Snowflake / Databricks compatible
+  tier_splits:    true       # Separate files per tier (platinum/gold/silver)
+  dialect_splits: true       # Separate files per dialect
+  train_val_test: true       # 80/10/10 splits (same as FLEURS)
+
+# ─── HuggingFace Publishing ───────────────────────────────────────────────────
+# Set hf_token via: --hf-token hf_xxx (CLI) or HF_TOKEN env variable.
+
+hf_org:   "ubuntu-corpus"          # Public HuggingFace organization
+
+# ─── Languages & Sources ──────────────────────────────────────────────────────
+# Domains: news | radio | podcast | speech | sermon | education | market | music
+# Priority: high | medium | low
+# country: ISO 3166-1 alpha-2 (optional — auto-detected from region if absent)
+
+languages:
+
+  # ── East Africa ──────────────────────────────────────────────────────────────
+
+  - name: "Swahili"
+    code: "sw"
+    region: "East Africa"
+    dialects: ["sw-TZ", "sw-KE", "sw-CD", "sw-UG"]
+    speakers_millions: 200
+    sources:
+      - url: "https://www.youtube.com/@BBCNewsSwahili"
+        domain: "news"
+        priority: high
+        country: "KE"
+      - url: "https://www.youtube.com/@VOASwahili"
+        domain: "news"
+        priority: high
+        country: "TZ"
+      - url: "https://www.youtube.com/@RFIKiswahili"
+        domain: "news"
+        priority: high
+        country: "TZ"
+
+  - name: "Amharic"
+    code: "am"
+    region: "Horn of Africa"
+    dialects: ["am-ET"]
+    speakers_millions: 30
+    sources:
+      - url: "https://www.youtube.com/@BBCAmharic"
+        domain: "news"
+        priority: high
+        country: "ET"
+      - url: "https://www.youtube.com/@VOAAmharic"
+        domain: "news"
+        priority: high
+        country: "ET"
+      - url: "https://www.youtube.com/@DWAmharic"
+        domain: "news"
+        priority: high
+        country: "ET"
+
+  # ── West Africa ──────────────────────────────────────────────────────────────
+
+  - name: "Hausa"
+    code: "ha"
+    region: "West Africa"
+    dialects: ["ha-NG", "ha-NE", "ha-GH"]
+    speakers_millions: 80
+    sources:
+      - url: "https://www.youtube.com/@BBCHausa"
+        domain: "news"
+        priority: high
+        country: "NG"
+      - url: "https://www.youtube.com/@VOAHausa"
+        domain: "news"
+        priority: high
+        country: "NG"
+      - url: "https://www.youtube.com/@DWHausa"
+        domain: "news"
+        priority: high
+        country: "NG"
+
+  - name: "Yoruba"
+    code: "yo"
+    region: "West Africa"
+    dialects: ["yo-NG", "yo-BJ", "yo-GH"]
+    speakers_millions: 50
+    sources:
+      - url: "https://www.youtube.com/@BBCYoruba"
+        domain: "news"
+        priority: high
+        country: "NG"
+      - url: "https://www.youtube.com/@VOAYoruba"
+        domain: "news"
+        priority: high
+        country: "NG"
+
+  - name: "Igbo"
+    code: "ig"
+    region: "West Africa"
+    dialects: ["ig-NG"]
+    speakers_millions: 35
+    sources:
+      - url: "https://www.youtube.com/@BBCIgbo"
+        domain: "news"
+        priority: high
+        country: "NG"
+
+  - name: "Wolof"
+    code: "wo"
+    region: "West Africa"
+    dialects: ["wo-SN", "wo-GM"]
+    speakers_millions: 12
+    sources:
+      - url: "https://www.youtube.com/@RFIWolof"
+        domain: "radio"
+        priority: high
+        country: "SN"
+
+  - name: "Bambara"
+    code: "bm"
+    region: "West Africa"
+    dialects: ["bm-ML", "bm-GN"]
+    speakers_millions: 15
+    sources:
+      - url: "https://www.youtube.com/@RFIBambara"
+        domain: "radio"
+        priority: high
+        country: "ML"
+
+  - name: "Fula"
+    code: "ff"
+    region: "West Africa"
+    dialects: ["ff-SN", "ff-GN", "ff-ML", "ff-NG"]
+    speakers_millions: 40
+    sources:
+      - url: "https://www.youtube.com/@RFIFula"
+        domain: "radio"
+        priority: medium
+        country: "SN"
+
+  # ── Central Africa ────────────────────────────────────────────────────────────
+
+  - name: "Lingala"
+    code: "ln"
+    region: "Central Africa"
+    dialects: ["ln-CD", "ln-CG", "ln-CF"]
+    speakers_millions: 40
+    sources:
+      - url: "https://www.youtube.com/@RFILingala"
+        domain: "radio"
+        priority: high
+        country: "CD"
+      - url: "https://www.youtube.com/@VOALingala"
+        domain: "news"
+        priority: high
+        country: "CD"
+
+  # ── West Africa (Gulf of Guinea) ──────────────────────────────────────────────
+
+  - name: "Twi"
+    code: "ak"
+    region: "West Africa"
+    dialects: ["ak-GH"]
+    speakers_millions: 10
+    sources:
+      - url: "https://www.youtube.com/@BBCTwi"
+        domain: "news"
+        priority: high
+        country: "GH"
+
+  - name: "Fon"
+    code: "fon"
+    region: "West Africa"
+    dialects: ["fon-BJ"]
+    speakers_millions: 5
+    sources:
+      - url: "https://www.youtube.com/@RFIFon"
+        domain: "radio"
+        priority: medium
+        country: "BJ"
+
+# ─── Adding a New Language ────────────────────────────────────────────────────
+#
+# Example (4 required fields + sources):
+#
+#   - name: "Zulu"
+#     code: "zu"
+#     region: "Southern Africa"
+#     sources:
+#       - url: "https://www.youtube.com/@SABCZulu"
+#         domain: "news"
+#         country: "ZA"
+#
+# Then run: python pipeline.py
+# That's it. The pipeline handles everything else.
+# ─────────────────────────────────────────────────────────────────────────────
