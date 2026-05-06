@@ -1,0 +1,58 @@
+Name: Ubuntu Corpus — World-Class Automated Pipeline
+
+on:
+  schedule:
+    # S'exécute à Minuit (UTC) le Lundi, Mercredi et Vendredi
+    # (Soit 01h00 du matin à Brazzaville)
+    - cron: '0 0 * * 1,3,5'
+
+  # Permet de lancer le pipeline manuellement pour tester
+  workflow_dispatch:
+
+jobs:
+  run-world-class-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # Sécurité : coupe après 6h maximum
+
+    steps:
+      - name: 📥 Récupération du code (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configuration de Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 🎵 Installation de FFmpeg (Système)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: 📦 Installation des dépendances Python
+        run: |
+          pip install --upgrade pip
+          # Installation via ton fichier mis à jour (faster-whisper inclus)
+          pip install -r requirements-1.txt
+          # On installe la version CPU de Torch pour optimiser l'espace sur le runner GitHub
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: ⚙️ Exécution du Pipeline V1
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python pipeline.py \
+            --model distil-large-v3 \
+            --use-mms \
+            --device cpu \
+            --hf-token "$HF_TOKEN" \
+            --hf-org ubuntu-corpus
+
+      - name: 💾 Sauvegarde des logs et échantillons (Artifacts)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-results-${{ github.run_id }}
+          path: |
+            data/
+            pipeline.log
+          retention-days: 7
