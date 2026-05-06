@@ -1,4 +1,4 @@
-Name: Ubuntu Corpus — World-Class Automated Pipeline
+name: Ubuntu Corpus — World-Class Automated Pipeline
 
 on:
   schedule:
