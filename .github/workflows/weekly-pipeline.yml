@@ -1,11 +1,12 @@
-# ════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════                     ═══════════════════════════════════════════════════
 #  Ubuntu Corpus — Scheduled Pipeline Workflow
 #
 #  Runs every Monday, Wednesday, and Friday at 00:00 UTC.
 #  Executes the full pipeline: harvest → transcribe → quality → export → publish.
 #
 #  Secrets required (set in GitHub repo Settings → Secrets → Actions):
-#    HF_TOKEN   — HuggingFace API token (for dataset publishing)
+#    HF_TOKEN        — HuggingFace API token (for dataset publishing)
+#    YOUTUBE_COOKIES — YouTube cookies.txt content (to bypass IP restrictions)
 # ════════════════════════════════════════════════════════════════════════════
 
 name: Ubuntu Corpus — Weekly Pipeline
@@ -59,7 +60,11 @@ jobs:
           restore-keys: |
             audio-cache-${{ runner.os }}-
 
-      # ── 6. Run pipeline ───────────────────────────────────────────────────
+      # ── 6. Write YouTube cookies ───────────────────────────────────────────
+      - name: Write YouTube cookies
+        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
+      # ── 7. Run pipeline ───────────────────────────────────────────────────
       - name: Run Ubuntu Corpus pipeline
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -67,10 +72,11 @@ jobs:
           python pipeline.py \
             --model distil-whisper/distil-large-v3 \
             --use-mms \
+            --cookies cookies.txt \
             --hf-token "$HF_TOKEN" \
             --workers 2
 
-      # ── 7. Upload pipeline log as artifact ────────────────────────────────
+      # ── 8. Upload pipeline log as artifact ────────────────────────────────
       - name: Upload pipeline log
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,7 +85,7 @@ jobs:
           path: pipeline.log
           retention-days: 30
 
-      # ── 8. Upload generated datasets as artifact ──────────────────────────
+      # ── 9. Upload generated datasets as artifact ──────────────────────────
       - name: Upload datasets
         if: success()
         uses: actions/upload-artifact@v4
