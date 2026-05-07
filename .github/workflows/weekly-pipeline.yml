@@ -1,58 +1,89 @@
-name: Ubuntu Corpus — World-Class Automated Pipeline
+# ════════════════════════════════════════════════════════════════════════════
+#  Ubuntu Corpus — Scheduled Pipeline Workflow
+#
+#  Runs every Monday, Wednesday, and Friday at 00:00 UTC.
+#  Executes the full pipeline: harvest → transcribe → quality → export → publish.
+#
+#  Secrets required (set in GitHub repo Settings → Secrets → Actions):
+#    HF_TOKEN   — HuggingFace API token (for dataset publishing)
+# ════════════════════════════════════════════════════════════════════════════
+
+name: Ubuntu Corpus — Weekly Pipeline
 
 on:
   schedule:
-    # S'exécute à Minuit (UTC) le Lundi, Mercredi et Vendredi
-    # (Soit 01h00 du matin à Brazzaville)
-    - cron: '0 0 * * 1,3,5'
+    - cron: "0 0 * * 1"   # Monday    00:00 UTC
+    - cron: "0 0 * * 3"   # Wednesday 00:00 UTC
+    - cron: "0 0 * * 5"   # Friday    00:00 UTC
 
-  # Permet de lancer le pipeline manuellement pour tester
+  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
 
 jobs:
-  run-world-class-pipeline:
+  run-pipeline:
+    name: Run Full Pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # Sécurité : coupe après 6h maximum
+    timeout-minutes: 360   # 6h max — large-v3 / distil-large-v3 on CPU can be slow
 
     steps:
-      - name: 📥 Récupération du code (Checkout)
+
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Configuration de Python 3.10
+      # ── 2. Python setup ───────────────────────────────────────────────────
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.11"
+          cache: "pip"
 
-      - name: 🎵 Installation de FFmpeg (Système)
+      # ── 3. System dependencies (ffmpeg) ───────────────────────────────────
+      - name: Install system dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
+          ffmpeg -version
+          ffprobe -version
 
-      - name: 📦 Installation des dépendances Python
-        run: |
-          pip install --upgrade pip
-          # Installation via ton fichier mis à jour (faster-whisper inclus)
-          pip install -r requirements-1.txt
-          # On installe la version CPU de Torch pour optimiser l'espace sur le runner GitHub
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # ── 4. Python dependencies ────────────────────────────────────────────
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
-      - name: ⚙️ Exécution du Pipeline V1
+      # ── 5. Restore audio cache (speeds up re-runs) ────────────────────────
+      - name: Restore harvest cache
+        uses: actions/cache@v4
+        with:
+          path: data/audio
+          key: audio-cache-${{ runner.os }}-${{ hashFiles('config.yaml') }}
+          restore-keys: |
+            audio-cache-${{ runner.os }}-
+
+      # ── 6. Run pipeline ───────────────────────────────────────────────────
+      - name: Run Ubuntu Corpus pipeline
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python pipeline.py \
-            --model distil-large-v3 \
+            --model distil-whisper/distil-large-v3 \
             --use-mms \
-            --device cpu \
             --hf-token "$HF_TOKEN" \
-            --hf-org ubuntu-corpus
+            --workers 2
 
-      - name: 💾 Sauvegarde des logs et échantillons (Artifacts)
-        uses: actions/upload-artifact@v4
+      # ── 7. Upload pipeline log as artifact ────────────────────────────────
+      - name: Upload pipeline log
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: run-results-${{ github.run_id }}
-          path: |
-            data/
-            pipeline.log
+          name: pipeline-log-${{ github.run_id }}
+          path: pipeline.log
+          retention-days: 30
+
+      # ── 8. Upload generated datasets as artifact ──────────────────────────
+      - name: Upload datasets
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasets-${{ github.run_id }}
+          path: data/datasets/
           retention-days: 7

@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-ubuntu--corpus-yellow)](https://huggingface.co/ubuntu-corpus)
 [![Quality](https://img.shields.io/badge/quality-world--class-brightgreen.svg)]()
-[![Models](https://img.shields.io/badge/models-Whisper%20large--v3%20%2B%20MMS--300M-orange.svg)]()
+[![Models](https://img.shields.io/badge/models-distil--whisper%2Fdistil--large--v3%20%2B%20MMS--300M-orange.svg)]()
 
 ---
 
@@ -40,7 +40,7 @@ F06 · Repetition ratio < 3% (looping audio, jingles rejected)
 F07 · Lexical diversity ≥ 0.50 TTR (no repetitive content)
 F08 · Language purity < 10% foreign tokens (code-switching filter)
 F09 · Audio SNR ≥ 8dB (background noise check)
-F10 · Dual-model cross-validation (Whisper large-v3 ↔ MMS-300M)
+F10 · Dual-model cross-validation (distil-whisper/distil-large-v3 ↔ MMS-300M)
 ```
 
 Filter #10 is the key innovation: **two independent AI models must agree** on the transcription before a record gets a Platinum or Gold tier. This is the same dual-signal methodology used internally at Google for FLEURS.
@@ -55,7 +55,7 @@ Filter #10 is the key innovation: **two independent AI models must agree** on th
 │                                                                       │
 │  Stage 0 · Pre-flight     Environment & dependency validation        │
 │  Stage 1 · Harvest        Parallel download (yt-dlp, RSS, direct)   │
-│  Stage 2 · Transcribe     Whisper large-v3 (primary)                │
+│  Stage 2 · Transcribe     distil-whisper/distil-large-v3 (primary)        │
 │                           MMS-300M (secondary, cross-validation)     │
 │  Stage 3 · Quality        10-point gauntlet → tier assignment       │
 │  Stage 4 · Enrich         Dialect detection · speaker estimation     │
@@ -126,14 +126,14 @@ pip install openai-whisper yt-dlp pyyaml
 ### 3. Run
 
 ```bash
-# World-class run (best quality — requires ~4GB RAM for Whisper large-v3):
-python pipeline.py --model large-v3 --use-mms
+# World-class run (best quality — requires ~600MB RAM for distil-large-v3):
+python pipeline.py --model distil-whisper/distil-large-v3 --use-mms
 
 # Publish to HuggingFace:
-python pipeline.py --model large-v3 --use-mms --hf-token hf_yourtoken
+python pipeline.py --model distil-whisper/distil-large-v3 --use-mms --hf-token hf_yourtoken
 
 # GPU accelerated (10x faster):
-python pipeline.py --model large-v3 --device cuda --use-mms
+python pipeline.py --model distil-whisper/distil-large-v3 --device cuda --use-mms
 
 # Fast test run (lower quality, faster):
 python pipeline.py --model base --no-mms
@@ -339,7 +339,7 @@ Every dataset published is a step toward AI that speaks *to* Africans, not past 
   year    = {2026},
   url     = {https://github.com/ubuntu-corpus/pipeline},
   license = {Apache-2.0},
-  note    = {V1. 10-point quality gauntlet. Whisper large-v3 + MMS-300M cross-validation.}
+  note    = {V1. 10-point quality gauntlet. distil-whisper/distil-large-v3 + MMS-300M cross-validation.}
 }
 ```
 

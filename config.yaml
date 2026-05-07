@@ -28,10 +28,11 @@ harvest_delay_seconds:   2           # Polite crawling delay between downloads
 max_harvest_workers:     2           # Parallel download threads
 
 # ─── Transcription ────────────────────────────────────────────────────────────
-# Recommendation: large-v3 for world-class quality, base for fast testing.
-# large-v3 = 1.5GB RAM, ~10x slower than base, but dramatically better on African langs.
+# Recommendation: distil-whisper/distil-large-v3 for faster inference with near-identical
+# quality to large-v3. distil-large-v3 = ~600MB RAM, ~6x faster than large-v3.
+# Requires: pip install transformers accelerate
 
-whisper_model:  "distil-large-v3"          # tiny | base | small | medium | large-v3 | distil-large-v3
+whisper_model:  "distil-whisper/distil-large-v3"   # tiny | base | small | medium | large-v3 | distil-whisper/distil-large-v3
 device:         "cpu"               # cpu | cuda
 
 # ─── Quality Thresholds ───────────────────────────────────────────────────────

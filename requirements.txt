@@ -18,7 +18,11 @@
 # ════════════════════════════════════════════════════════════════════════════
 
 # ── CORE — Required ───────────────────────────────────────────────────────────
-faster-whisper>=1.0.0      # Primary transcription model (Whisper large-v3)
+# distil-whisper/distil-large-v3 runs via the HuggingFace transformers pipeline.
+# openai-whisper is kept as fallback for standard models (base, medium, large-v3).
+transformers>=4.37.0            # distil-whisper/distil-large-v3 primary transcription model
+accelerate>=0.26.0              # Required by transformers for optimized inference
+openai-whisper>=20231117        # Fallback for standard Whisper models (base, medium, large-v3)
 yt-dlp>=2024.1.1                # Audio harvesting (YouTube, 1000+ platforms)
 pyyaml>=6.0                     # Config file parsing
 requests>=2.31.0                # HTTP requests (RSS, direct downloads)
@@ -27,10 +31,6 @@ tqdm>=4.66.0                    # Progress bars
 # ── QUALITY — Strongly Recommended ───────────────────────────────────────────
 # Enables: dual-model cross-validation, language purity, audio SNR analysis.
 # Without these, pipeline still runs but produces lower quality data.
-
-transformers>=4.37.0            # Facebook MMS-300M secondary transcription model
-                                # Used for cross-validation: Whisper ↔ MMS agreement score
-                                # Determines quality tier (Platinum/Gold/Silver)
 
 librosa>=0.10.0                 # Audio signal processing
                                 # Used for: SNR computation, silence ratio, audio quality

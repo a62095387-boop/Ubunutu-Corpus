@@ -9,7 +9,7 @@
 ║   Architecture:                                                              ║
 ║     Stage 0 · Pre-flight checks & environment validation                    ║
 ║     Stage 1 · Parallel audio harvesting (yt-dlp, RSS, direct)              ║
-║     Stage 2 · Dual-model transcription (Whisper large-v3 + MMS-300M)       ║
+║     Stage 2 · Dual-model transcription (distil-whisper/distil-large-v3 + MMS-300M)       ║
 ║     Stage 3 · 10-point Quality Gauntlet (language purity, dedup, SNR…)    ║
 ║     Stage 4 · Dialect detection & speaker estimation                        ║
 ║     Stage 5 · Parquet + JSONL export with Arrow schema                     ║
@@ -565,7 +565,7 @@ class DualModelTranscriber:
     """
     Stage 2 — World-class dual-model transcription engine.
 
-    Primary  : OpenAI Whisper large-v3 (best general-purpose, supports African langs)
+    Primary  : distil-whisper/distil-large-v3 (6x faster than large-v3, near-identical quality for African langs)
     Secondary: Facebook MMS-300M (1,100+ languages, excellent for low-resource African)
 
     The two models act as independent judges. Their Levenshtein agreement score
@@ -579,11 +579,11 @@ class DualModelTranscriber:
     - word_timestamps=True for precise segment alignment
     """
 
-    WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3","distil-large-V3"]
+    WHISPER_MODELS = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3", "distil-whisper/distil-large-v3"]
 
     def __init__(
         self,
-        whisper_model: str = "distil-large-v3",
+        whisper_model: str = "distil-whisper/distil-large-v3",
         device: str = "cpu",
         use_mms: bool = True,
     ):
@@ -598,12 +598,31 @@ class DualModelTranscriber:
 
     def _load_whisper(self):
         try:
-            from faster_whisper import WhisperModel
-            log.info(f"  Loading Faster-Whisper [{self.whisper_model_name}] on {self.device}...")
-            self._whisper = whisper.load_model(self.whisper_model_name, device=self.device , compute="int8")
-            log.info(f"  ✅ Faster-Whisper [{self.whisper_model_name}] ready")
-        except ImportError:
-            raise EnvironmentError("faster-whisper not installed. Run: pip install faster-whisper")
+            log.info(f"  Loading Whisper [{self.whisper_model_name}] on {self.device}...")
+            if self.whisper_model_name.startswith("distil-whisper/"):
+                # distil-whisper models require the HuggingFace transformers pipeline
+                from transformers import pipeline as hf_pipeline
+                import torch
+                torch_device = 0 if self.device == "cuda" else -1
+                self._whisper = hf_pipeline(
+                    "automatic-speech-recognition",
+                    model=self.whisper_model_name,
+                    device=torch_device,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    return_timestamps=True,
+                )
+                self._whisper_is_distil = True
+            else:
+                import whisper
+                self._whisper = whisper.load_model(self.whisper_model_name, device=self.device)
+                self._whisper_is_distil = False
+            log.info(f"  ✅ Whisper [{self.whisper_model_name}] ready")
+        except ImportError as e:
+            raise EnvironmentError(
+                f"Missing dependency for {self.whisper_model_name}: {e}. "
+                "For distil-whisper run: pip install transformers accelerate. "
+                "For openai-whisper run: pip install openai-whisper"
+            )
 
     def _load_mms(self):
         try:
@@ -629,19 +648,40 @@ class DualModelTranscriber:
 
         log.info(f"  Transcribing [{doc.language}] {doc.doc_id}...")
 
-        # ── Primary: Whisper ──────────────────────────────────────────────────
-        result = self._whisper.transcribe(
-            doc.audio_path,
-            language=doc.language_code if len(doc.language_code) == 2 else None,
-            word_timestamps=True,
-            verbose=False,
-            condition_on_previous_text=True,
-            compression_ratio_threshold=2.4,
-            no_speech_threshold=0.55,
-            temperature=0.0,    # Deterministic — reproducible results
-        )
-
-        raw_segments = result.get("segments", [])
+        # ── Primary: Whisper / distil-whisper ────────────────────────────────
+        if getattr(self, "_whisper_is_distil", False):
+            # distil-whisper via transformers pipeline
+            raw_output = self._whisper(
+                doc.audio_path,
+                generate_kwargs={
+                    "language": doc.language_code if len(doc.language_code) == 2 else None,
+                    "temperature": 0.0,
+                },
+                return_timestamps=True,
+            )
+            # Normalize to the same shape as openai-whisper
+            raw_segments = [
+                {
+                    "text":          chunk["text"].strip(),
+                    "start":         chunk["timestamp"][0] if chunk["timestamp"][0] is not None else 0.0,
+                    "end":           chunk["timestamp"][1] if chunk["timestamp"][1] is not None else 0.0,
+                    "no_speech_prob": 0.0,   # distil-whisper doesn't expose this; treated as clean
+                }
+                for chunk in raw_output.get("chunks", [])
+            ]
+        else:
+            # Standard openai-whisper
+            result = self._whisper.transcribe(
+                doc.audio_path,
+                language=doc.language_code if len(doc.language_code) == 2 else None,
+                word_timestamps=True,
+                verbose=False,
+                condition_on_previous_text=True,
+                compression_ratio_threshold=2.4,
+                no_speech_threshold=0.55,
+                temperature=0.0,
+            )
+            raw_segments = result.get("segments", [])
         segments: list[TranscriptSegment] = []
 
         for i, seg in enumerate(raw_segments):
@@ -1788,7 +1828,7 @@ class PipelineReport:
 
 def run_pipeline(
     config_path:      str  = "config.yaml",
-    whisper_model:    str  = "large-v3",
+    whisper_model:    str  = "distil-whisper/distil-large-v3",
     hf_token:         Optional[str] = None,
     hf_org:           str  = "ubuntu-corpus",
     skip_harvest:     bool = False,
@@ -1816,7 +1856,7 @@ def run_pipeline(
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    if whisper_model != "large-v3":
+    if whisper_model != "distil-whisper/distil-large-v3":
         config["whisper_model"] = whisper_model
     if device != "cpu":
         config["device"] = device
@@ -1849,7 +1889,7 @@ def run_pipeline(
     log.info("\n─ STAGE 2: DUAL-MODEL TRANSCRIPTION (Whisper + MMS) " + "─" * 12)
     if not skip_transcribe and docs:
         transcriber = DualModelTranscriber(
-            whisper_model=config.get("whisper_model", "large-v3"),
+            whisper_model=config.get("whisper_model", "distil-whisper/distil-large-v3"),
             device=config.get("device", "cpu"),
             use_mms=use_mms,
         )
@@ -1906,16 +1946,16 @@ Quality Tiers:
 
 Examples:
   # Full pipeline (world-class settings):
-  python pipeline.py --model large-v3 --use-mms
+  python pipeline.py --model distil-whisper/distil-large-v3 --use-mms
 
   # Full pipeline + publish to HuggingFace:
-  python pipeline.py --model large-v3 --hf-token hf_xxx
+  python pipeline.py --model distil-whisper/distil-large-v3 --hf-token hf_xxx
 
   # GPU accelerated (much faster):
-  python pipeline.py --model large-v3 --device cuda --use-mms
+  python pipeline.py --model distil-whisper/distil-large-v3 --device cuda --use-mms
 
-  # Faster but lower quality (for testing):
-  python pipeline.py --model base --no-mms
+  # Classic large-v3 (higher RAM, slower):
+  python pipeline.py --model large-v3 --use-mms
 
   # Re-run quality gauntlet on already-transcribed cache:
   python pipeline.py --skip-harvest --skip-transcribe
@@ -1925,7 +1965,7 @@ Examples:
         """,
     )
     parser.add_argument("--config",           default="config.yaml",  help="Config file path")
-    parser.add_argument("--model",            default="distil-large-v3",     help="Whisper model (tiny|base|small|medium|large-v3|distil-large-v3)")
+    parser.add_argument("--model",            default="distil-whisper/distil-large-v3", help="Whisper model (tiny|base|small|medium|large-v3|distil-whisper/distil-large-v3)")
     parser.add_argument("--hf-token",         default=None,           help="HuggingFace API token")
     parser.add_argument("--hf-org",           default="ubuntu-corpus",help="HuggingFace organization")
     parser.add_argument("--device",           default="cpu",          help="Device: cpu or cuda")
