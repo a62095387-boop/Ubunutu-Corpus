@@ -476,8 +476,13 @@ class Harvester:
                 "--quiet",
                 "--retries",       "3",
                 "--socket-timeout","30",
-                url,
             ]
+            # Inject YouTube cookies if available (required on GitHub Actions)
+            cookies_file = os.environ.get("YT_DLP_COOKIES", "")
+            if cookies_file and os.path.isfile(cookies_file):
+                cmd += ["--cookies", cookies_file]
+                log.info(f"  🍪 Using cookies from: {cookies_file}")
+            cmd.append(url)
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0 or not out_path.exists():
                 log.warning(f"  ✗ Download failed [{doc_id}]: {result.stderr[:200]}")
@@ -1889,7 +1894,7 @@ def run_pipeline(
     log.info("\n─ STAGE 2: DUAL-MODEL TRANSCRIPTION (Whisper + MMS) " + "─" * 12)
     if not skip_transcribe and docs:
         transcriber = DualModelTranscriber(
-            whisper_model=config.get("whisper_model", "distil-whisper/distil-large-v3"),
+            whisper_model=config.get("whisper_model", "large-v3"),
             device=config.get("device", "cpu"),
             use_mms=use_mms,
         )
