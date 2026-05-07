@@ -1,4 +1,4 @@
-# ═════════════════════════                     ═══════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════
 #  Ubuntu Corpus — Scheduled Pipeline Workflow
 #
 #  Runs every Monday, Wednesday, and Friday at 00:00 UTC.
@@ -17,41 +17,33 @@ on:
     - cron: "0 0 * * 3"   # Wednesday 00:00 UTC
     - cron: "0 0 * * 5"   # Friday    00:00 UTC
 
-  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
 
 jobs:
   run-pipeline:
     name: Run Full Pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # 6h max — large-v3 / distil-large-v3 on CPU can be slow
+    timeout-minutes: 360
 
     steps:
 
-      # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Python setup ───────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3. System dependencies (ffmpeg) ───────────────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-          ffmpeg -version
-          ffprobe -version
 
-      # ── 4. Python dependencies ────────────────────────────────────────────
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # ── 5. Restore audio cache (speeds up re-runs) ────────────────────────
       - name: Restore harvest cache
         uses: actions/cache@v4
         with:
@@ -60,23 +52,20 @@ jobs:
           restore-keys: |
             audio-cache-${{ runner.os }}-
 
-      # ── 6. Write YouTube cookies ───────────────────────────────────────────
       - name: Write YouTube cookies
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
 
-      # ── 7. Run pipeline ───────────────────────────────────────────────────
       - name: Run Ubuntu Corpus pipeline
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          YT_DLP_COOKIES: cookies.txt
         run: |
           python pipeline.py \
             --model distil-whisper/distil-large-v3 \
             --use-mms \
-            --cookies cookies.txt \
             --hf-token "$HF_TOKEN" \
             --workers 2
 
-      # ── 8. Upload pipeline log as artifact ────────────────────────────────
       - name: Upload pipeline log
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,7 +74,6 @@ jobs:
           path: pipeline.log
           retention-days: 30
 
-      # ── 9. Upload generated datasets as artifact ──────────────────────────
       - name: Upload datasets
         if: success()
         uses: actions/upload-artifact@v4
