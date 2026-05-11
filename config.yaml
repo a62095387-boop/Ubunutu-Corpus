@@ -25,7 +25,7 @@ version: "1.0"
 work_dir:                "data"
 max_duration_seconds:    3600        # Max 1 hour per audio source
 harvest_delay_seconds:   2           # Polite crawling delay between downloads
-max_harvest_workers:     2           # Parallel download threads
+max_harvest_workers:     4           # Parallel download threads
 
 # ─── Transcription ────────────────────────────────────────────────────────────
 # Recommendation: distil-whisper/distil-large-v3 for faster inference with near-identical
