@@ -1806,6 +1806,40 @@ def _load_cache(path: Path) -> list[AudioDocument]:
     return docs
 
 
+def _write_dataset_run_summary(
+    out_dir: Path,
+    *,
+    documents_total: int,
+    documents_published: int,
+    language_export_ran: bool,
+    huggingface_skipped: bool,
+) -> None:
+    """
+    Always leave at least one file under data/datasets/ so CI artifact uploads
+    and operators can see run outcomes even when zero rows pass the quality gauntlet.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "pipeline_version": PIPELINE_VERSION,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "documents_total": documents_total,
+        "documents_passed_quality": documents_published,
+        "per_language_export_ran": language_export_ran,
+        "huggingface_upload_skipped": huggingface_skipped,
+        "note": (
+            "No per-language JSONL/Parquet folders were written because no document "
+            "passed the quality filters, or the run ended before export."
+            if not language_export_ran
+            else "See language subdirectories for exported shards."
+        ),
+    }
+    path = out_dir / "run_summary.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    log.info(f"  Run summary written → {path}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # RUN REPORT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1965,9 +1999,19 @@ def run_pipeline(
 
     # ── Stage 5+6: Export & Publish ───────────────────────────────────────────
     log.info("\n─ STAGE 5+6: MULTI-FORMAT EXPORT & HUGGINGFACE PUBLISH " + "─" * 8)
-    if not skip_publish and published_docs:
+    language_export_ran = False
+    if published_docs:
         exporter = DatasetExporter(config, out_dir)
-        exporter.export_all(published_docs, hf_token=hf_token, hf_org=hf_org)
+        hf_tok = None if skip_publish else hf_token
+        exporter.export_all(published_docs, hf_token=hf_tok, hf_org=hf_org)
+        language_export_ran = True
+    _write_dataset_run_summary(
+        out_dir,
+        documents_total=len(docs),
+        documents_published=len(published_docs),
+        language_export_ran=language_export_ran,
+        huggingface_skipped=skip_publish or not hf_token,
+    )
     log.info(f"  Stage 5+6 complete")
 
     # ── Report ────────────────────────────────────────────────────────────────
@@ -2025,7 +2069,7 @@ Examples:
     parser.add_argument("--skip-harvest",     action="store_true",    help="Skip harvesting, use cached audio")
     parser.add_argument("--skip-transcribe",  action="store_true",    help="Skip transcription, use cached transcripts")
     parser.add_argument("--skip-quality",     action="store_true",    help="Skip quality gauntlet (not recommended)")
-    parser.add_argument("--skip-publish",     action="store_true",    help="Skip HuggingFace publishing")
+    parser.add_argument("--skip-publish",     action="store_true",    help="Skip HuggingFace Hub upload only (local export still runs if any row passed quality)")
     parser.add_argument("--no-preflight",     action="store_true",    help="Skip pre-flight environment checks")
     args = parser.parse_args()
 

@@ -23,14 +23,17 @@ jobs:
     name: Run Full Pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # Use Node.js 24 for JS-based actions (GitHub deprecation of Node 20 on runners).
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -48,7 +51,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore harvest cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: data/audio
           key: audio-cache-${{ runner.os }}-${{ hashFiles('config.yaml') }}
@@ -67,16 +70,18 @@ jobs:
 
       - name: Upload pipeline log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pipeline-log-${{ github.run_id }}
           path: pipeline.log
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload datasets
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: datasets-${{ github.run_id }}
           path: data/datasets/
+          if-no-files-found: warn
           retention-days: 7
