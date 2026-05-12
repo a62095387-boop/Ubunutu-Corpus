@@ -10,8 +10,11 @@
 #    PUBLISH      — Required for HuggingFace publishing.
 #    OPTIONAL     — Nice-to-have improvements.
 #
-#  Quick start (minimal):
-#    pip install openai-whisper yt-dlp pyyaml
+#  Quick start (minimal CPU, matches default config model distil-whisper):
+#    pip install transformers accelerate torch yt-dlp pyyaml requests tqdm
+#
+#  Quick start (OpenAI Whisper models only, e.g. large-v3 — no transformers):
+#    pip install openai-whisper yt-dlp pyyaml requests tqdm
 #
 #  Full world-class stack:
 #    pip install -r requirements.txt

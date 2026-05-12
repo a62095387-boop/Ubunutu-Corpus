@@ -30,6 +30,7 @@ import gc
 import io
 import os
 import re
+import sys
 import json
 import math
 import time
@@ -49,6 +50,20 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
+
+
+def _configure_stdio_utf8() -> None:
+    """Avoid UnicodeEncodeError on Windows (cp1252) when printing --help or logs with Unicode."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+
+
+_configure_stdio_utf8()
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -302,7 +317,7 @@ class PreflightChecker:
     """
 
     REQUIRED_BINARIES = ["yt-dlp", "ffmpeg", "ffprobe"]
-    REQUIRED_PACKAGES = ["whisper", "yaml"]
+    # whisper (openai-whisper) vs transformers+torch depends on whisper_model in config — see _check_python_packages
     OPTIONAL_PACKAGES = [
         ("transformers", "Cross-validation with MMS-300M (strongly recommended)"),
         ("librosa",      "Audio quality analysis (SNR, silence detection)"),
@@ -334,37 +349,63 @@ class PreflightChecker:
 
     def _check_binaries(self):
         for binary in self.REQUIRED_BINARIES:
-            result = subprocess.run(
-                [binary, "--version"], capture_output=True, text=True
-            )
-            if result.returncode != 0 or not shutil.which(binary):
-                self.errors.append(f"Required binary not found: {binary}")
-            else:
-                ver = result.stdout.strip().split("\n")[0][:60]
-                log.info(f"  ✅ {binary:<12} {ver}")
+            if not shutil.which(binary):
+                self.errors.append(f"Required binary not found: {binary} (install and ensure it is on PATH)")
+                continue
+            try:
+                result = subprocess.run(
+                    [binary, "--version"], capture_output=True, text=True, timeout=30
+                )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.errors.append(f"Required binary not runnable: {binary} ({e})")
+                continue
+            if result.returncode != 0:
+                self.errors.append(f"Required binary failed: {binary} --version (exit {result.returncode})")
+                continue
+            out = (result.stdout or result.stderr or "").strip()
+            ver = out.split("\n")[0][:60] if out else "(no version string)"
+            log.info(f"  OK {binary:<12} {ver}")
 
     def _check_python_packages(self):
-        for pkg in self.REQUIRED_PACKAGES:
+        model = str(self.config.get("whisper_model", "large-v3"))
+        if model.startswith("distil-whisper/"):
+            required: list[tuple[str, str]] = [
+                ("yaml", "pyyaml"),
+                ("transformers", "transformers"),
+                ("torch", "torch"),
+            ]
+        else:
+            required = [
+                ("yaml", "pyyaml"),
+                ("whisper", "openai-whisper"),
+            ]
+        for import_name, pip_name in required:
             try:
-                __import__(pkg)
-                log.info(f"  ✅ {pkg}")
+                __import__(import_name)
+                log.info(f"  OK {import_name}")
             except ImportError:
-                self.errors.append(f"Required package not installed: {pkg}. Run: pip install {pkg}")
+                self.errors.append(
+                    f"Required package not installed: {pip_name} (import `{import_name}`). "
+                    f"Run: pip install {pip_name}"
+                )
 
+        required_imports = {name for name, _ in required}
         for pkg, description in self.OPTIONAL_PACKAGES:
+            if pkg in required_imports:
+                continue
             try:
                 __import__(pkg)
-                log.info(f"  ✅ {pkg:<20} (optional — {description.split('(')[0].strip()})")
+                log.info(f"  OK {pkg:<20} (optional: {description.split('(')[0].strip()})")
             except ImportError:
                 self.warnings.append(f"Optional package missing: {pkg} — {description}")
-                log.warning(f"  ⚠️  {pkg:<20} not installed — {description}")
+                log.warning(f"  WARN {pkg:<20} not installed — {description}")
 
     def _check_config(self):
         languages = self.config.get("languages", [])
         if not languages:
             self.errors.append("No languages defined in config.yaml")
             return
-        log.info(f"  ✅ Config: {len(languages)} languages defined")
+        log.info(f"  OK Config: {len(languages)} languages defined")
         for lang in languages:
             if not lang.get("sources"):
                 self.warnings.append(f"Language '{lang.get('name')}' has no sources — will be skipped")
@@ -378,22 +419,22 @@ class PreflightChecker:
             if free_gb < 5:
                 self.warnings.append(f"Low disk space: {free_gb:.1f}GB free (recommend 10GB+)")
             else:
-                log.info(f"  ✅ Disk space: {free_gb:.1f}GB free")
+                log.info(f"  OK Disk space: {free_gb:.1f}GB free")
         except Exception:
             pass
 
     def _report(self):
         log.info("─" * 60)
         if self.errors:
-            log.error(f"  ❌ {len(self.errors)} ERRORS — pipeline cannot start:")
+            log.error(f"  FAIL {len(self.errors)} error(s) — pipeline cannot start:")
             for err in self.errors:
-                log.error(f"     • {err}")
+                log.error(f"     - {err}")
         if self.warnings:
-            log.warning(f"  ⚠️  {len(self.warnings)} WARNINGS (pipeline will run with reduced quality):")
+            log.warning(f"  WARN {len(self.warnings)} warning(s) (pipeline may run with reduced quality):")
             for w in self.warnings:
-                log.warning(f"     • {w}")
+                log.warning(f"     - {w}")
         if not self.errors and not self.warnings:
-            log.info("  ✅ All checks passed — environment is optimal")
+            log.info("  OK All checks passed — environment is optimal")
         log.info("─" * 60)
 
 
@@ -1859,12 +1900,14 @@ def run_pipeline(
 
     # ── Load config ───────────────────────────────────────────────────────────
     with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    if whisper_model != "distil-whisper/distil-large-v3":
-        config["whisper_model"] = whisper_model
-    if device != "cpu":
-        config["device"] = device
+        raw = yaml.safe_load(f)
+    if not isinstance(raw, dict):
+        log.error("Invalid config YAML: root must be a mapping (dictionary).")
+        return [], []
+    config = raw
+    # CLI always wins over file values for model and device (preflight + Stage 2 must agree).
+    config["whisper_model"] = whisper_model
+    config["device"] = device
 
     work_dir    = Path(config.get("work_dir", "data"))
     audio_dir   = work_dir / "audio"
@@ -1894,8 +1937,8 @@ def run_pipeline(
     log.info("\n─ STAGE 2: DUAL-MODEL TRANSCRIPTION (Whisper + MMS) " + "─" * 12)
     if not skip_transcribe and docs:
         transcriber = DualModelTranscriber(
-            whisper_model=config.get("whisper_model", "large-v3"),
-            device=config.get("device", "cpu"),
+            whisper_model=str(config.get("whisper_model", "distil-whisper/distil-large-v3")),
+            device=str(config.get("device", "cpu")),
             use_mms=use_mms,
         )
         docs = transcriber.transcribe_batch(docs)
@@ -1943,11 +1986,11 @@ def main():
         description="Ubuntu Corpus V1 — World-Class African AI Language Data Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Quality Tiers:
-  💎 Platinum  Quality ≥ 0.96 + CrossVal ≥ 88% agreement
-  🥇 Gold      Quality ≥ 0.88 + CrossVal ≥ 72% agreement
-  🥈 Silver    Quality ≥ 0.72 + CrossVal ≥ 55% agreement
-  ✗  Rejected  Failed one or more quality filters
+Quality tiers:
+  Platinum  Quality >= 0.96 + CrossVal >= 88% agreement
+  Gold      Quality >= 0.88 + CrossVal >= 72% agreement
+  Silver    Quality >= 0.72 + CrossVal >= 55% agreement
+  Rejected  Failed one or more quality filters
 
 Examples:
   # Full pipeline (world-class settings):
@@ -1971,12 +2014,14 @@ Examples:
     )
     parser.add_argument("--config",           default="config.yaml",  help="Config file path")
     parser.add_argument("--model",            default="distil-whisper/distil-large-v3", help="Whisper model (tiny|base|small|medium|large-v3|distil-whisper/distil-large-v3)")
-    parser.add_argument("--hf-token",         default=None,           help="HuggingFace API token")
+    parser.add_argument("--hf-token",         default=os.environ.get("HF_TOKEN"), help="HuggingFace API token (default: HF_TOKEN env var)")
     parser.add_argument("--hf-org",           default="ubuntu-corpus",help="HuggingFace organization")
     parser.add_argument("--device",           default="cpu",          help="Device: cpu or cuda")
     parser.add_argument("--workers",          default=4, type=int,    help="Parallel harvest workers")
-    parser.add_argument("--use-mms",          action="store_true",    default=True, help="Enable MMS cross-validation (default: on)")
-    parser.add_argument("--no-mms",           action="store_true",    help="Disable MMS cross-validation")
+    mms = parser.add_mutually_exclusive_group()
+    mms.add_argument("--use-mms",  dest="use_mms", action="store_true",  help="Enable MMS cross-validation (default)")
+    mms.add_argument("--no-mms",   dest="use_mms", action="store_false", help="Disable MMS cross-validation")
+    parser.set_defaults(use_mms=True)
     parser.add_argument("--skip-harvest",     action="store_true",    help="Skip harvesting, use cached audio")
     parser.add_argument("--skip-transcribe",  action="store_true",    help="Skip transcription, use cached transcripts")
     parser.add_argument("--skip-quality",     action="store_true",    help="Skip quality gauntlet (not recommended)")
@@ -1994,7 +2039,7 @@ Examples:
         skip_quality=args.skip_quality,
         skip_publish=args.skip_publish,
         device=args.device,
-        use_mms=not args.no_mms,
+        use_mms=args.use_mms,
         max_workers=args.workers,
         no_preflight=args.no_preflight,
     )

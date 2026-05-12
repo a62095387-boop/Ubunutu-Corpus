@@ -6,7 +6,6 @@
 #
 #  Secrets required (set in GitHub repo Settings → Secrets → Actions):
 #    HF_TOKEN        — HuggingFace API token (for dataset publishing)
-#    YOUTUBE_COOKIES — YouTube cookies.txt content (to bypass IP restrictions)
 # ════════════════════════════════════════════════════════════════════════════
 
 name: Ubuntu Corpus — Weekly Pipeline
@@ -40,6 +39,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
+          which ffmpeg
+          which ffprobe
+          ffmpeg -version
+          ffprobe -version
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -52,13 +55,9 @@ jobs:
           restore-keys: |
             audio-cache-${{ runner.os }}-
 
-      - name: Write YouTube cookies
-        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
-
       - name: Run Ubuntu Corpus pipeline
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          YT_DLP_COOKIES: cookies.txt
         run: |
           python pipeline.py \
             --model distil-whisper/distil-large-v3 \
